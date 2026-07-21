@@ -59,20 +59,26 @@ test('obs_switch_to_private refuses a private scene missing from the allow list'
   assert.deepEqual(calls, []);
 });
 
-test('obs_switch_to_private refuses a caller-supplied scene outside the allow list', async () => {
+test('obs_switch_to_private ignores a caller-supplied scene, allow-listed or not', async () => {
   const calls = [];
-  const result = await withEnv({
-    OBS_PRIVATE_SCENE: 'Private',
-    OBS_ALLOWED_SCENES: 'Scene A,Private',
-  }, () => handleToolCall(
-    'obs_switch_to_private',
-    { sceneName: 'Scene B' },
-    { connect: fakeObs(calls) },
-  ));
+  const env = { OBS_PRIVATE_SCENE: 'Private', OBS_ALLOWED_SCENES: 'Scene A,Private' };
 
-  assert.equal(result.isError, true);
-  assert.match(textOf(result), /not in OBS_ALLOWED_SCENES: Scene B/);
-  assert.deepEqual(calls, []);
+  // The ungated path must not reach "Scene A" just because the allow list has it.
+  for (const sceneName of ['Scene A', 'Scene B']) {
+    const result = await withEnv(env, () => handleToolCall(
+      'obs_switch_to_private',
+      { sceneName },
+      { connect: fakeObs(calls) },
+    ));
+    assert.equal(result.isError, undefined);
+  }
+
+  assert.deepEqual(calls, ['Private', 'Private']);
+  assert.equal(
+    tools.find((tool) => tool.name === 'obs_switch_to_private').inputSchema.properties.sceneName,
+    undefined,
+    'the panic button must not advertise a scene argument',
+  );
 });
 
 test('obs_switch_to_private fails closed when no private scene is configured', async () => {

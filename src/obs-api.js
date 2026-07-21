@@ -42,8 +42,14 @@ export function parseAllowedScenes(rawValue) {
     .filter(Boolean);
 }
 
-export function requirePrivateScene(sceneName) {
-  const value = String(sceneName ?? process.env.OBS_PRIVATE_SCENE ?? '').trim();
+/**
+ * The private scene comes from env only. A caller-supplied override would make
+ * the panic button — the one path that skips both the enable flag and the
+ * confirm token — reachable for every allow-listed scene, not just the one that
+ * hides the screen.
+ */
+export function requirePrivateScene() {
+  const value = String(process.env.OBS_PRIVATE_SCENE ?? '').trim();
   if (!value) {
     throw new Error('OBS_PRIVATE_SCENE is not set: this instance has no private scene configured');
   }

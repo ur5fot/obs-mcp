@@ -42,15 +42,10 @@ export const tools = [
   },
   {
     name: 'obs_switch_to_private',
-    description: 'Emergency switch to OBS private/hide scene. Scene name comes from OBS_PRIVATE_SCENE unless passed explicitly.',
+    description: 'Emergency switch to OBS private/hide scene. Takes no arguments: the target scene is OBS_PRIVATE_SCENE.',
     inputSchema: {
       type: 'object',
-      properties: {
-        sceneName: {
-          type: 'string',
-          description: 'Private scene name. Scene name comes from OBS_PRIVATE_SCENE unless passed explicitly.',
-        },
-      },
+      properties: {},
       additionalProperties: false,
     },
     annotations: { destructiveHint: true },
@@ -102,10 +97,12 @@ async function callTool(name, args, { connect = withObs } = {}) {
     case 'obs_get_scene_list':
       return connect((obs) => obs.getSceneList());
     case 'obs_switch_to_private': {
-      // sceneName is caller-supplied and this tool deliberately bypasses both
-      // OBS_SCENE_SWITCH_ENABLED and the confirm token, so the allow list is the
-      // only thing keeping "hide the screen" from switching to an arbitrary scene.
-      const sceneName = requirePrivateScene(args.sceneName);
+      // This tool deliberately bypasses both OBS_SCENE_SWITCH_ENABLED and the
+      // confirm token, so it takes no scene from the caller: an argument here
+      // would open every allow-listed scene (full-screen capture included) to
+      // any session with no gate at all. Target is OBS_PRIVATE_SCENE, and the
+      // allow list stays as the second check.
+      const sceneName = requirePrivateScene();
       if (!parseAllowedScenes(process.env.OBS_ALLOWED_SCENES).includes(sceneName)) {
         throw new Error(`Private scene is not in OBS_ALLOWED_SCENES: ${sceneName}`);
       }

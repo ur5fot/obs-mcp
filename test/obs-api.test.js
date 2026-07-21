@@ -79,15 +79,15 @@ test('parseAllowedScenes is empty without OBS_ALLOWED_SCENES, so no scene is inh
   assert.deepEqual(parseAllowedScenes('A, B,, C '), ['A', 'B', 'C']);
 });
 
-test('requirePrivateScene fails loudly instead of guessing a scene name', () => {
-  assert.equal(requirePrivateScene('Private'), 'Private');
-
+test('requirePrivateScene reads env only and fails loudly instead of guessing', () => {
   const previous = process.env.OBS_PRIVATE_SCENE;
   process.env.OBS_PRIVATE_SCENE = 'Env Private';
   try {
-    assert.equal(requirePrivateScene(undefined), 'Env Private');
+    assert.equal(requirePrivateScene(), 'Env Private');
+    // An argument must not be able to redirect the panic button.
+    assert.equal(requirePrivateScene('Other Scene'), 'Env Private');
     delete process.env.OBS_PRIVATE_SCENE;
-    assert.throws(() => requirePrivateScene(undefined), /OBS_PRIVATE_SCENE is not set/);
+    assert.throws(() => requirePrivateScene(), /OBS_PRIVATE_SCENE is not set/);
   } finally {
     if (previous === undefined) delete process.env.OBS_PRIVATE_SCENE;
     else process.env.OBS_PRIVATE_SCENE = previous;
