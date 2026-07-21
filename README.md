@@ -71,8 +71,8 @@ owning project with `--env-file`:
 ```bash
 OBS_WEBSOCKET_URL=ws://127.0.0.1:4455
 OBS_WEBSOCKET_PASSWORD=local-only
-OBS_PRIVATE_SCENE="5 Private / Hide Screen"
-OBS_ALLOWED_SCENES="1 Starting Soon,4 FULL,5 Private / Hide Screen,6 BRB scene"
+OBS_PRIVATE_SCENE="Private"
+OBS_ALLOWED_SCENES="Scene A,Scene B,Private"
 ```
 
 The server does not read any `.env` on its own: configuration comes from the
@@ -165,6 +165,9 @@ restart the client. No code is copied.
 
 - **Server does not start at all.** `--env-file` (unlike `--env-file-if-exists`)
   **fails** when the file is missing — check the path first.
+- **`bad option: --env-file`.** The `node` on PATH is older than 20.6, where the
+  flag does not exist yet. That is a different failure from a missing env file:
+  check `node -v` of the exact binary named in `command`.
 - **`npm install` and the server disagree on versions.**
   `/opt/homebrew/bin/node` is not the same runtime as `node` from a nvm PATH.
 - **`Failed to connect to OBS WebSocket`.** OBS is not running, or port `4455`

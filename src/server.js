@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { pathToFileURL } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -18,7 +19,7 @@ const SERVER_INFO = {
   version: '0.1.0',
 };
 
-const tools = [
+export const tools = [
   {
     name: 'obs_get_status',
     description: 'Read OBS version, current scene, stream status, and recording status through local OBS WebSocket.',
@@ -94,42 +95,54 @@ async function withObs(callback) {
   }
 }
 
-async function callTool(name, args) {
+async function callTool(name, args, { connect = withObs } = {}) {
   switch (name) {
     case 'obs_get_status':
-      return withObs((obs) => obs.getStatus());
+      return connect((obs) => obs.getStatus());
     case 'obs_get_scene_list':
-      return withObs((obs) => obs.getSceneList());
+      return connect((obs) => obs.getSceneList());
     case 'obs_switch_to_private': {
+      // sceneName is caller-supplied and this tool deliberately bypasses both
+      // OBS_SCENE_SWITCH_ENABLED and the confirm token, so the allow list is the
+      // only thing keeping "hide the screen" from switching to an arbitrary scene.
       const sceneName = requirePrivateScene(args.sceneName);
       if (!parseAllowedScenes(process.env.OBS_ALLOWED_SCENES).includes(sceneName)) {
         throw new Error(`Private scene is not in OBS_ALLOWED_SCENES: ${sceneName}`);
       }
-      return withObs((obs) => obs.setCurrentProgramScene(sceneName));
+      return connect((obs) => obs.setCurrentProgramScene(sceneName));
     }
     case 'obs_switch_scene':
       requireSceneSwitchAllowed(args.sceneName, { confirm: args.confirm });
-      return withObs((obs) => obs.setCurrentProgramScene(args.sceneName));
+      return connect((obs) => obs.setCurrentProgramScene(args.sceneName));
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
 }
 
-const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+/** Runs a tool and formats both success and failure the way MCP clients see it. */
+export async function handleToolCall(name, args = {}, options = {}) {
   try {
-    const value = await callTool(
-      request.params.name,
-      request.params.arguments ?? {},
-    );
-    return textResult(value);
+    return textResult(await callTool(name, args, options));
   } catch (error) {
     return textResult(error instanceof Error ? error.message : String(error), true);
   }
-});
+}
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+function isMainModule() {
+  const entry = process.argv[1];
+  return Boolean(entry) && import.meta.url === pathToFileURL(entry).href;
+}
+
+if (isMainModule()) {
+  const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => handleToolCall(
+    request.params.name,
+    request.params.arguments ?? {},
+  ));
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}

@@ -197,10 +197,24 @@ export class ObsWebSocketClient {
       this.pending.set(requestId, { resolve, reject, timeout, requestType });
     });
 
-    this.socket.send(JSON.stringify({
-      op: OPCODES.request,
-      d: { requestType, requestId, requestData },
-    }));
+    // send() throws when OBS closed the socket between connect and request. The
+    // pending promise already exists at that point and nobody is holding it, so
+    // its later rejection (timeout or disconnect) would be unhandled and kill the
+    // process — drop the entry here instead of leaving it orphaned.
+    try {
+      this.socket.send(JSON.stringify({
+        op: OPCODES.request,
+        d: { requestType, requestId, requestData },
+      }));
+    } catch (error) {
+      const entry = this.pending.get(requestId);
+      if (entry) {
+        clearTimeout(entry.timeout);
+        this.pending.delete(requestId);
+      }
+      promise.catch(() => {});
+      throw new ObsWebSocketError(`OBS request failed to send: ${requestType}`, { cause: String(error) });
+    }
 
     return promise;
   }

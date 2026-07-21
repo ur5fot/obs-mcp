@@ -80,7 +80,7 @@ test('parseAllowedScenes is empty without OBS_ALLOWED_SCENES, so no scene is inh
 });
 
 test('requirePrivateScene fails loudly instead of guessing a scene name', () => {
-  assert.equal(requirePrivateScene('5 Private / Hide Screen'), '5 Private / Hide Screen');
+  assert.equal(requirePrivateScene('Private'), 'Private');
 
   const previous = process.env.OBS_PRIVATE_SCENE;
   process.env.OBS_PRIVATE_SCENE = 'Env Private';
@@ -96,33 +96,33 @@ test('requirePrivateScene fails loudly instead of guessing a scene name', () => 
 
 test('requireSceneSwitchAllowed requires flag, confirm token, and allow list', () => {
   assert.throws(
-    () => requireSceneSwitchAllowed('2 Coding', { switchEnabled: 'false', confirm: SWITCH_CONFIRM }),
+    () => requireSceneSwitchAllowed('Scene A', { switchEnabled: 'false', confirm: SWITCH_CONFIRM }),
     /disabled/,
   );
   assert.throws(
-    () => requireSceneSwitchAllowed('2 Coding', { switchEnabled: 'true', confirm: 'nope' }),
+    () => requireSceneSwitchAllowed('Scene A', { switchEnabled: 'true', confirm: 'nope' }),
     /Missing confirm token/,
   );
   assert.throws(
     () => requireSceneSwitchAllowed('Unknown', {
       switchEnabled: 'true',
       confirm: SWITCH_CONFIRM,
-      allowedScenes: ['2 Coding'],
+      allowedScenes: ['Scene A'],
     }),
     /not in OBS_ALLOWED_SCENES/,
   );
   assert.throws(
-    () => requireSceneSwitchAllowed('2 Coding', {
+    () => requireSceneSwitchAllowed('Scene A', {
       switchEnabled: 'true',
       confirm: SWITCH_CONFIRM,
       allowedScenes: [],
     }),
     /OBS_ALLOWED_SCENES is not set/,
   );
-  assert.doesNotThrow(() => requireSceneSwitchAllowed('2 Coding', {
+  assert.doesNotThrow(() => requireSceneSwitchAllowed('Scene A', {
     switchEnabled: 'true',
     confirm: SWITCH_CONFIRM,
-    allowedScenes: ['2 Coding'],
+    allowedScenes: ['Scene A'],
   }));
 });
 
@@ -213,11 +213,11 @@ test('ObsWebSocketClient identifies and resolves request responses', async () =>
     d: {
       requestId: request.d.requestId,
       requestStatus: { result: true, code: 100 },
-      responseData: { currentProgramSceneName: '2 Coding' },
+      responseData: { currentProgramSceneName: 'Scene A' },
     },
   });
 
-  assert.deepEqual(await requestPromise, { currentProgramSceneName: '2 Coding' });
+  assert.deepEqual(await requestPromise, { currentProgramSceneName: 'Scene A' });
 });
 
 test('normalizeObsStatus keeps useful operational fields only', () => {
@@ -227,7 +227,7 @@ test('normalizeObsStatus keeps useful operational fields only', () => {
       obsWebSocketVersion: '5.5.0',
       platformDescription: 'local machine details',
     },
-    currentScene: { currentProgramSceneName: '2 Coding' },
+    currentScene: { currentProgramSceneName: 'Scene A' },
     streamStatus: {
       outputActive: true,
       outputReconnecting: false,
@@ -249,7 +249,7 @@ test('normalizeObsStatus keeps useful operational fields only', () => {
     connected: true,
     obsVersion: '32.0.0',
     obsWebSocketVersion: '5.5.0',
-    currentProgramSceneName: '2 Coding',
+    currentProgramSceneName: 'Scene A',
     stream: {
       active: true,
       reconnecting: false,
@@ -267,4 +267,33 @@ test('normalizeObsStatus keeps useful operational fields only', () => {
       bytes: 0,
     },
   });
+});
+
+test('request() does not orphan a pending promise when the socket rejects send', async () => {
+  const socket = new FakeSocket();
+  const client = new ObsWebSocketClient({
+    socketFactory: () => socket,
+    requestTimeoutMs: 10,
+  });
+
+  const connectPromise = client.connect();
+  socket.open();
+  socket.serverMessage({ op: 0, d: { rpcVersion: 1 } });
+  await waitUntil(() => socket.sent.length === 1);
+  socket.serverMessage({ op: 2, d: { negotiatedRpcVersion: 1 } });
+  await connectPromise;
+
+  // OBS closed the socket between connect and request: undici throws here.
+  socket.send = () => {
+    throw new Error('InvalidStateError: WebSocket is not open');
+  };
+
+  await assert.rejects(
+    () => client.request('GetVersion'),
+    /OBS request failed to send: GetVersion/,
+  );
+  // An entry left in `pending` would reject with nobody listening once the
+  // timeout fires, which takes the whole stdio server down.
+  assert.equal(client.pending.size, 0);
+  await new Promise((resolve) => setTimeout(resolve, 30));
 });

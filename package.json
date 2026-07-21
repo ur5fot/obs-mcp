@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.6"
+  },
   "description": "Local conservative MCP server for OBS control over OBS WebSocket.",
   "bin": {
     "obs-mcp": "./src/server.js"
