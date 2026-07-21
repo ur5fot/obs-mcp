@@ -117,7 +117,11 @@ Claude Code, `.mcp.json` of the owning project:
 }
 ```
 
-Codex, `~/.codex/config.toml`:
+Codex, `~/.codex/config.toml` — note that this file has no per-project scoping,
+so the entry loads in **every** Codex session, personal ones included, carrying
+the account's env file with it. Register here only with `OBS_SCENE_SWITCH_ENABLED`
+left `false`, so those sessions get status and scene list plus the
+`obs_switch_to_private` panic button and nothing else:
 
 ```toml
 [mcp_servers.<account>-obs]
