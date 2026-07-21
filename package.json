@@ -1,0 +1,18 @@
+{
+  "name": "obs-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local conservative MCP server for OBS control over OBS WebSocket.",
+  "bin": {
+    "obs-mcp": "./src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {}
+}
