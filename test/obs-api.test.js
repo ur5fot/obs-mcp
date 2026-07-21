@@ -7,6 +7,7 @@ import {
   buildObsAuthentication,
   normalizeObsStatus,
   parseAllowedScenes,
+  requirePrivateScene,
   requireSceneSwitchAllowed,
 } from '../src/obs-api.js';
 
@@ -42,6 +43,15 @@ class FakeSocket extends EventEmitter {
   serverMessage(message) {
     this.emit('message', { data: JSON.stringify(message) });
   }
+
+  rawMessage(data) {
+    this.emit('message', { data });
+  }
+
+  fail() {
+    this.emit('error', new Error('connect ECONNREFUSED'));
+    this.close();
+  }
 }
 
 async function waitUntil(predicate, timeoutMs = 100) {
@@ -63,9 +73,25 @@ test('buildObsAuthentication follows OBS WebSocket v5 auth shape', () => {
   assert.equal(auth, 'zTM5ki6L2vVvBQiTG9ckH1Lh64AbnCf6XZ226UmnkIA=');
 });
 
-test('parseAllowedScenes defaults to known Dedus OBS scenes', () => {
-  assert.ok(parseAllowedScenes(undefined).includes('5 Private / Hide Screen'));
+test('parseAllowedScenes is empty without OBS_ALLOWED_SCENES, so no scene is inherited', () => {
+  assert.deepEqual(parseAllowedScenes(undefined), []);
+  assert.deepEqual(parseAllowedScenes(''), []);
   assert.deepEqual(parseAllowedScenes('A, B,, C '), ['A', 'B', 'C']);
+});
+
+test('requirePrivateScene fails loudly instead of guessing a scene name', () => {
+  assert.equal(requirePrivateScene('5 Private / Hide Screen'), '5 Private / Hide Screen');
+
+  const previous = process.env.OBS_PRIVATE_SCENE;
+  process.env.OBS_PRIVATE_SCENE = 'Env Private';
+  try {
+    assert.equal(requirePrivateScene(undefined), 'Env Private');
+    delete process.env.OBS_PRIVATE_SCENE;
+    assert.throws(() => requirePrivateScene(undefined), /OBS_PRIVATE_SCENE is not set/);
+  } finally {
+    if (previous === undefined) delete process.env.OBS_PRIVATE_SCENE;
+    else process.env.OBS_PRIVATE_SCENE = previous;
+  }
 });
 
 test('requireSceneSwitchAllowed requires flag, confirm token, and allow list', () => {
@@ -85,6 +111,14 @@ test('requireSceneSwitchAllowed requires flag, confirm token, and allow list', (
     }),
     /not in OBS_ALLOWED_SCENES/,
   );
+  assert.throws(
+    () => requireSceneSwitchAllowed('2 Coding', {
+      switchEnabled: 'true',
+      confirm: SWITCH_CONFIRM,
+      allowedScenes: [],
+    }),
+    /OBS_ALLOWED_SCENES is not set/,
+  );
   assert.doesNotThrow(() => requireSceneSwitchAllowed('2 Coding', {
     switchEnabled: 'true',
     confirm: SWITCH_CONFIRM,
@@ -99,6 +133,48 @@ test('ObsWebSocketClient reports missing WebSocket runtime clearly', async () =>
     () => client.connect(),
     /WebSocket is not available/,
   );
+});
+
+test('failed connect rejects without leaving an unhandled rejection behind', async () => {
+  const socket = new FakeSocket();
+  const client = new ObsWebSocketClient({
+    socketFactory: () => socket,
+    requestTimeoutMs: 50,
+  });
+
+  const rejections = [];
+  const onRejection = (reason) => rejections.push(reason);
+  process.on('unhandledRejection', onRejection);
+  try {
+    const connectPromise = client.connect();
+    socket.fail();
+    await assert.rejects(() => connectPromise, /OBS WebSocket/);
+    // Let the microtask queue drain so a stray rejection would surface.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(rejections, []);
+    assert.equal(client.socket, null, 'socket must be closed when the handshake fails');
+  } finally {
+    process.off('unhandledRejection', onRejection);
+  }
+});
+
+test('malformed frame fails in-flight requests instead of crashing the process', async () => {
+  const socket = new FakeSocket();
+  const client = new ObsWebSocketClient({
+    socketFactory: () => socket,
+    requestTimeoutMs: 100,
+  });
+
+  const connectPromise = client.connect();
+  socket.open();
+  socket.serverMessage({ op: 0, d: { rpcVersion: 1 } });
+  await waitUntil(() => socket.sent.length === 1);
+  socket.serverMessage({ op: 2, d: { negotiatedRpcVersion: 1 } });
+  await connectPromise;
+
+  const requestPromise = client.request('GetVersion');
+  assert.doesNotThrow(() => socket.rawMessage('not-json{'));
+  await assert.rejects(() => requestPromise, /malformed frame/);
 });
 
 test('ObsWebSocketClient identifies and resolves request responses', async () => {

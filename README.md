@@ -30,15 +30,16 @@ obs_switch_scene
 |---|---|---|
 | `OBS_WEBSOCKET_URL` | no | default `ws://127.0.0.1:4455` |
 | `OBS_WEBSOCKET_PASSWORD` | when OBS auth is on | never printed |
-| `OBS_PRIVATE_SCENE` | no | default `5 Private / Hide Screen` |
-| `OBS_ALLOWED_SCENES` | no | comma-separated; a built-in list is used when unset |
+| `OBS_PRIVATE_SCENE` | for `obs_switch_to_private` | no default: unset means the tool errors out |
+| `OBS_ALLOWED_SCENES` | for any scene switch | comma-separated; unset means no scene is allowed |
 | `OBS_SCENE_SWITCH_ENABLED` | for `obs_switch_scene` | default false |
 | `OBS_RPC_VERSION` | no | default 1 |
 | `OBS_REQUEST_TIMEOUT_MS` | no | default 5000 |
 
-Scene names are per-setup, so the built-in defaults are only a fallback — set
-`OBS_ALLOWED_SCENES` and `OBS_PRIVATE_SCENE` in the project env file to match
-the actual OBS scene collection.
+Scene names are per-setup, so this repo carries none: set `OBS_ALLOWED_SCENES`
+and `OBS_PRIVATE_SCENE` in the project env file to match the actual OBS scene
+collection. Both fail closed when unset, so a second account cannot inherit
+someone else's allow list by forgetting a key.
 
 ## Setup
 

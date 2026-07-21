@@ -1,18 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 export const DEFAULT_OBS_URL = 'ws://127.0.0.1:4455';
-export const DEFAULT_PRIVATE_SCENE = '5 Private / Hide Screen';
 export const SWITCH_CONFIRM = 'SWITCH_DEDUS_DEV_OBS_SCENE';
-
-export const DEFAULT_ALLOWED_SCENES = [
-  '1 Starting Soon',
-  '2 Coding',
-  '3 Web',
-  '4 Discord',
-  '5 Private / Hide Screen',
-  '6 BRB scene',
-  '9 Ending / Стрим закончен',
-];
 
 const OPCODES = {
   hello: 0,
@@ -40,12 +29,25 @@ function sha256Base64(value) {
   return createHash('sha256').update(value).digest('base64');
 }
 
+/**
+ * Scene names belong to an account, not to this repo: an unset OBS_ALLOWED_SCENES
+ * means nothing is allowed, so a second account cannot inherit someone else's
+ * allow list by forgetting the key.
+ */
 export function parseAllowedScenes(rawValue) {
-  if (!rawValue) return [...DEFAULT_ALLOWED_SCENES];
+  if (!rawValue) return [];
   return rawValue
     .split(',')
     .map((scene) => scene.trim())
     .filter(Boolean);
+}
+
+export function requirePrivateScene(sceneName) {
+  const value = String(sceneName ?? process.env.OBS_PRIVATE_SCENE ?? '').trim();
+  if (!value) {
+    throw new Error('OBS_PRIVATE_SCENE is not set: this instance has no private scene configured');
+  }
+  return value;
 }
 
 export function isSceneAllowed(sceneName, allowedScenes) {
@@ -62,6 +64,9 @@ export function requireSceneSwitchAllowed(sceneName, {
   }
   if (confirm !== SWITCH_CONFIRM) {
     throw new Error(`Missing confirm token. Pass confirm="${SWITCH_CONFIRM}" to switch non-private scenes.`);
+  }
+  if (allowedScenes.length === 0) {
+    throw new Error('OBS_ALLOWED_SCENES is not set: no scene may be switched to');
   }
   if (!isSceneAllowed(sceneName, allowedScenes)) {
     throw new Error(`Scene is not in OBS_ALLOWED_SCENES: ${sceneName}`);
@@ -135,29 +140,42 @@ export class ObsWebSocketClient {
     socket.addEventListener('error', () => this.rejectPending(new ObsWebSocketError('OBS WebSocket error.')));
 
     const helloPromise = this.waitForOpcode(OPCODES.hello);
-    await waitForSocketOpen(socket, this.requestTimeoutMs);
-    const hello = await helloPromise;
-    this.hello = hello.d;
+    // helloPromise is rejected by the socket error/close listeners; without a catch
+    // here the rejection is unhandled (and kills the process) whenever the socket
+    // itself fails first, because connect() rejects on waitForSocketOpen instead.
+    helloPromise.catch(() => {});
 
-    const authentication = hello.d?.authentication
-      ? buildObsAuthentication(this.password, hello.d.authentication)
-      : undefined;
+    try {
+      await waitForSocketOpen(socket, this.requestTimeoutMs);
+      const hello = await helloPromise;
+      this.hello = hello.d;
 
-    if (hello.d?.authentication && !authentication) {
-      throw new ObsWebSocketError('OBS WebSocket requires OBS_WEBSOCKET_PASSWORD.');
+      const authentication = hello.d?.authentication
+        ? buildObsAuthentication(this.password, hello.d.authentication)
+        : undefined;
+
+      if (hello.d?.authentication && !authentication) {
+        throw new ObsWebSocketError('OBS WebSocket requires OBS_WEBSOCKET_PASSWORD.');
+      }
+
+      const identifiedPromise = this.waitForOpcode(OPCODES.identified);
+      identifiedPromise.catch(() => {});
+      socket.send(JSON.stringify({
+        op: OPCODES.identify,
+        d: {
+          rpcVersion: this.rpcVersion,
+          ...(authentication ? { authentication } : {}),
+        },
+      }));
+
+      await identifiedPromise;
+      return this;
+    } catch (error) {
+      // The socket may already be open (handshake failure); close it so a failed
+      // tool call does not leak a live connection to OBS.
+      await this.disconnect();
+      throw error;
     }
-
-    const identifiedPromise = this.waitForOpcode(OPCODES.identified);
-    socket.send(JSON.stringify({
-      op: OPCODES.identify,
-      d: {
-        rpcVersion: this.rpcVersion,
-        ...(authentication ? { authentication } : {}),
-      },
-    }));
-
-    await identifiedPromise;
-    return this;
   }
 
   async disconnect() {
@@ -212,7 +230,15 @@ export class ObsWebSocketClient {
 
   handleMessage(event) {
     const raw = typeof event.data === 'string' ? event.data : event.data.toString();
-    const message = JSON.parse(raw);
+    let message;
+    try {
+      message = JSON.parse(raw);
+    } catch {
+      // A malformed frame must not throw out of the listener as an uncaught
+      // exception — fail the in-flight requests instead of killing the process.
+      this.rejectPending(new ObsWebSocketError('OBS WebSocket sent a malformed frame.'));
+      return;
+    }
 
     if (message.op === OPCODES.requestResponse) {
       this.handleRequestResponse(message.d);

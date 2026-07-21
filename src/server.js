@@ -6,10 +6,10 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import {
-  DEFAULT_PRIVATE_SCENE,
   ObsWebSocketClient,
   SWITCH_CONFIRM,
   parseAllowedScenes,
+  requirePrivateScene,
   requireSceneSwitchAllowed,
 } from './obs-api.js';
 
@@ -41,13 +41,13 @@ const tools = [
   },
   {
     name: 'obs_switch_to_private',
-    description: 'Emergency switch to OBS private/hide scene. Defaults to OBS_PRIVATE_SCENE or "5 Private / Hide Screen".',
+    description: 'Emergency switch to OBS private/hide scene. Scene name comes from OBS_PRIVATE_SCENE unless passed explicitly.',
     inputSchema: {
       type: 'object',
       properties: {
         sceneName: {
           type: 'string',
-          description: 'Private scene name. Defaults to OBS_PRIVATE_SCENE or "5 Private / Hide Screen".',
+          description: 'Private scene name. Scene name comes from OBS_PRIVATE_SCENE unless passed explicitly.',
         },
       },
       additionalProperties: false,
@@ -86,8 +86,8 @@ function textResult(value, isError = false) {
 
 async function withObs(callback) {
   const obs = new ObsWebSocketClient();
-  await obs.connect();
   try {
+    await obs.connect();
     return await callback(obs);
   } finally {
     await obs.disconnect();
@@ -101,7 +101,7 @@ async function callTool(name, args) {
     case 'obs_get_scene_list':
       return withObs((obs) => obs.getSceneList());
     case 'obs_switch_to_private': {
-      const sceneName = args.sceneName ?? process.env.OBS_PRIVATE_SCENE ?? DEFAULT_PRIVATE_SCENE;
+      const sceneName = requirePrivateScene(args.sceneName);
       if (!parseAllowedScenes(process.env.OBS_ALLOWED_SCENES).includes(sceneName)) {
         throw new Error(`Private scene is not in OBS_ALLOWED_SCENES: ${sceneName}`);
       }
